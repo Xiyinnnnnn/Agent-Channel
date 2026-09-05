@@ -10,10 +10,25 @@
 
 ## 架构
 
-```
-微信 / QQ ──► Adapter ──► Channel Manager ──► Agent 子进程
-    ▲                        │  ▲                  │
-    └────── 回复/文件 ◄───────┘  └── channel-reply ◄┘ (Unix Socket, JSONLines)
+```mermaid
+flowchart LR
+    subgraph IM["消息平台"]
+        WX["微信 iLink<br/>getUpdates 长轮询"]
+        QQ["QQ OneBot11<br/>反向 HTTP 事件"]
+    end
+    subgraph AC["Agent-Channel"]
+        AD["Adapter 层<br/>wechat / qq / local"]
+        M["Channel Manager<br/>会话路由 · 子进程管理 · socket 服务"]
+        SP["Agent 子进程<br/>stdin 长开 · 常驻"]
+    end
+    WX -->|"① 消息"| AD
+    QQ -->|"① 消息"| AD
+    AD -->|"② 统一 Message 模型"| M
+    M -->|"③ 写一行任务"| SP
+    SP -->|"④ channel-reply / channel-send-file<br/>(Unix Socket · JSONLines · 0600)"| M
+    M -->|"⑤ Adapter.send_text / send_file"| AD
+    AD -->|"⑥ 回复 / 文件"| WX
+    AD -->|"⑥ 回复 / 文件"| QQ
 ```
 
 - **触发式常驻会话**：每个聊天(`conversation_id`)常驻一个 Agent 进程，`stdin` 长开、CPU≈0；
