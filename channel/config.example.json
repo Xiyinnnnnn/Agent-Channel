@@ -1,0 +1,6 @@
+{
+  "agent": "./agents/demo_agent.py",
+  "adapters": ["local"],
+  "wechat": {},
+  "qq": {}
+}

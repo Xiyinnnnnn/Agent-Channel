@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 本地运行配置（含登录态/密钥，绝不入库）
+channel/config.json
+channel/config.local.json
+*.session
+*.token
+*.key
+
+# Channel Manager 运行期产物
+channel/runtime/
+channel/inbox/
+channel/ilink/accounts/
+*.db
+*.db-shm
+*.db-wal
+
+# 微信/QQ 登录态（HOME 持久目录，非仓库内，双保险忽略）
+ilink-weixin/
+
+# 杂项
+*.bak*
+*.log
+.DS_Store

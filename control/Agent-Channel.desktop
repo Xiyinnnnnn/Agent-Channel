@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Agent Channel
+Name[zh_CN]=Agent Channel
+Comment=微信/QQ 通道统一管理：启动停止 Channel、登录状态、多模态开关
+Comment[zh_CN]=微信/QQ 通道统一管理：启动停止 Channel、登录状态、多模态开关
+Exec=__PY__ __CONTROL_PY__
+Icon=utilities-terminal
+Terminal=true
+Categories=Utility;X-AI;
+Keywords=channel;agent;微信;QQ;通道;管理;
