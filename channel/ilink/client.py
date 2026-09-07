@@ -50,6 +50,43 @@ class Client:
             raise RuntimeError(f"sendmessage ret={resp.get('ret')} errmsg={resp.get('errmsg')}")
         return resp
 
+    # ---------- 媒体上传（P1 FILE outbound） ----------
+    def get_upload_url(self, *, filekey, media_type, to_user_id, rawsize, rawfilemd5,
+                       filesize, aeskey, no_need_thumb=True):
+        """ilink/bot/getuploadurl。返回原始响应 dict（含 upload_full_url/upload_param）。
+
+        aeskey 参数 = 16字节 AES key 的 32 位小写 hex 串（官方 wire 字段 aeskey，非 aeskey_hex）。"""
+        body = {
+            "filekey": filekey,
+            "media_type": int(media_type),
+            "to_user_id": to_user_id,
+            "rawsize": rawsize,
+            "rawfilemd5": rawfilemd5,
+            "filesize": filesize,
+            "no_need_thumb": no_need_thumb,
+            "aeskey": aeskey,
+            "base_info": build_base_info(),
+        }
+        raw = net.post(self.base_url, "ilink/bot/getuploadurl", body, token=self.token)
+        resp = json.loads(raw)
+        return resp
+
+    def send_file_message(self, *, to_user_id, file_item, context_token=None, run_id=None):
+        """发送单条 FILE 消息（item_list 恰一条 type=4）。返回响应 dict。
+        file_item 由 media_upload 组装（media/encrypt_query_param/aes_key/...）。"""
+        msg = {
+            "from_user_id": "", "to_user_id": to_user_id,
+            "client_id": _client_id(),
+            "message_type": 2, "message_state": 2,
+            "item_list": [{"type": 4, "file_item": file_item}],
+            **({"context_token": context_token} if context_token else {}),
+            **({"run_id": run_id} if run_id else {}),
+        }
+        raw = net.post(self.base_url, "ilink/bot/sendmessage",
+                       {"msg": msg, "base_info": build_base_info()}, token=self.token)
+        resp = json.loads(raw)
+        return resp
+
     # ---------- 收消息归一化（文本/附件摘要） ----------
     @staticmethod
     def extract_text(full):

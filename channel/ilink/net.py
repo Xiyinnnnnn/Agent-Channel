@@ -4,6 +4,8 @@ import json, os, random, ssl, time, urllib.request, urllib.error
 
 # ---- 固定常量（逆向自官方源码，勿随意改） ----
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
+# 官方 auth/accounts.ts: CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
+CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
 ILINK_APP_ID = "bot"                       # package.json ilink_appid
 CHANNEL_VERSION = "0.1.0"                  # 我方 channel 版本（用于 iLink-App-ClientVersion 编码）
 CLIENT_VERSION_INT = (0 << 16) | (1 << 8) | 0   # 0x000100 = 1.0.0
@@ -38,9 +40,9 @@ def _build_headers(token=None):
 
 
 class IlinkError(Exception):
-    def __init__(self, msg, kind="unknown", code=None, resp=None):
+    def __init__(self, msg, kind="unknown", code=None, resp=None, headers=None):
         super().__init__(msg)
-        self.kind = kind; self.code = code; self.resp = resp
+        self.kind = kind; self.code = code; self.resp = resp; self.headers = headers
 
 
 def _classify(err):
@@ -77,6 +79,37 @@ def get(base_url, endpoint, token=None, timeout=API_TIMEOUT_MS):
     url = base_url.rstrip("/") + "/" + endpoint.lstrip("/")
     return _do(url, body=None, token=token, timeout=timeout)
 
+
+
+def post_bytes(base_url, url, data, token=None, timeout=API_TIMEOUT_MS, raw_headers=None):
+    """二进制 POST（CDN 上传用）。body 为 bytes，Content-Type 可覆盖。
+    复用 _do 的错误分类（timeout/dns/tls/http），但不带 JSON 序列化。"""
+    req = urllib.request.Request(url, data=data, method="POST")
+    for k, v in (_build_headers(token) if raw_headers is None else raw_headers).items():
+        req.add_header(k, v)
+    if raw_headers is None:
+        req.add_header("Content-Type", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_CTX) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        raise IlinkError(f"HTTP {e.code}: {raw[:200]}", "http", code=e.code, resp=raw, headers=e.headers if hasattr(e,'headers') else None)
+    except Exception as e:
+        # URL 可能含 encrypt_query_param/filekey，异常串须脱敏后外抛
+        msg = str(e)
+        for _ in range(3):
+            i = msg.find("?encrypted_query_param=")
+            if i < 0: break
+            seg = msg[i:].split(" ")[0].split("'")[0]
+            msg = msg.replace(seg, "?encrypted_query_param=<redacted>", 1)
+        raise IlinkError(f"网络错误: {msg}", _classify(e))
+
+def build_cdn_headers(token=None):
+    """CDN POST 专用头：JSON 路径的 Content-Type 换成 octet-stream，其余照旧。"""
+    h = _build_headers(token)
+    h["Content-Type"] = "application/octet-stream"
+    return h
 
 def build_base_info():
     return {"channel_version": CHANNEL_VERSION, "bot_agent": BOT_AGENT}

@@ -16,7 +16,7 @@ if _CH not in sys.path:
     sys.path.insert(0, _CH)
 
 from ilink.client import Client
-from ilink import accounts as acc_store
+from ilink import accounts as acc_store, context_store as ctx_store
 from .base import BaseAdapter
 
 class WechatAdapter(BaseAdapter):
@@ -26,6 +26,8 @@ class WechatAdapter(BaseAdapter):
         c = cfg.get("wechat") or {}
         self.runtime_dir = cfg.get("runtime_dir") or "/tmp/agent-channel"
         self.accounts_cfg = c.get("accounts") or []
+        # context_token 持久化目录：与登录态同一 HOME 目录（跨重启可恢复）
+        self.ctx_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "agent-terminal", "channel")
         self._stop = threading.Event()
         self._threads = []
         self._ctx_token = {}      # sender_id -> context_token（每条新消息覆盖）
@@ -99,6 +101,10 @@ class WechatAdapter(BaseAdapter):
             ct = full.get("context_token")
             if ct:
                 self._ctx_token[frm] = ct
+                try:
+                    ctx_store.save(f"private:{frm}", ct, self.ctx_dir)  # 重启可恢复
+                except Exception:
+                    pass
             att = []
             if Client.has_media(full):
                 # 图片/文件暂不自动下载 → 摘要提示，避免无 key 解密
@@ -128,7 +134,11 @@ class WechatAdapter(BaseAdapter):
         cl = self._clients.get(aid or "")
         if cl is None:
             raise RuntimeError("微信未登录或账号不存在，请先在控制中心执行「微信登录」")
+        # context_token 内存优先，缺失时回退持久化（进程重启后恢复）
         ct = self._ctx_token.get(sid)
+        if not ct:
+            try: ct = ctx_store.get(f"private:{sid}", self.ctx_dir)
+            except Exception: ct = None
         import time as _t
         _t0 = _t.time()
         try:
@@ -139,8 +149,42 @@ class WechatAdapter(BaseAdapter):
         print(f"[WechatAdapter] send_text 成功 sid={sid} len={len(text)} 耗时={_t.time()-_t0:.2f}s", file=sys.stderr, flush=True)
 
     def send_file(self, msg, path):
-        # 文本回复已可用；文件上传需 CDN+AES，暂返回明确提示由 Agent 转文字/链接
-        raise RuntimeError("微信文件发送尚未接入 CDN（图片/文件请用文字+链接传达），文本回复正常。")
+        """真实 FILE 发送：CDN 上传(AES) + sendMessage(FILE)。
+        适配层只做参数组装与错误转译；AES/CDN/MD5/URL 全在 channel/ilink/。"""
+        from ilink import media_upload
+        sid = str(msg.get("sender_id") or "")
+        aid = msg.get("account_id")
+        if not aid and len(self._clients) == 1:
+            aid = next(iter(self._clients))
+        cl = self._clients.get(aid or "")
+        if cl is None:
+            raise RuntimeError("微信未登录或账号不存在，请先在控制中心执行「微信登录」")
+        if not sid:
+            raise RuntimeError("微信消息缺少 sender_id，无法定位接收者")
+        # context_token：内存优先 → 持久化兜底
+        ct = self._ctx_token.get(sid)
+        if not ct:
+            try: ct = ctx_store.get(f"private:{sid}", self.ctx_dir)
+            except Exception: ct = None
+        if not ct:
+            # 官方 send.ts 缺 context_token 仅 warn 照发；但我们明确提示更利于诊断
+            raise RuntimeError("缺少 context_token：请先让对方给本 bot 发一条消息，再重试发文件")
+        import time as _t
+        _t0 = _t.time()
+        try:
+            # P1 恒定 FILE（png/jpg 也走 FILE=3/4，绝不因扩展名进 IMAGE）
+            media_upload.send_file(cl, to_user_id=sid, file_path=path,
+                                   context_token=ct, run_id=str(msg.get("run_id") or ""))
+        except media_upload.ContextTokenError as e:
+            print(f"[WechatAdapter] send_file 失败 context_token expired/invalid: {e}（等下次 inbound 自然恢复）",
+                  file=sys.stderr, flush=True)
+            raise
+        except Exception as e:
+            print(f"[WechatAdapter] send_file 失败 path={path} err={e!r}", file=sys.stderr, flush=True)
+            raise
+        import os as _os
+        print(f"[WechatAdapter] send_file 成功 path={_os.path.basename(path)} sid={sid} 耗时={_t.time()-_t0:.2f}s",
+              file=sys.stderr, flush=True)
 
     def stop(self):
         self._stop.set()
