@@ -269,6 +269,33 @@ def start_channel():
         print(tail)
         return False
     print(c(f"已启动 (PID {proc.pid})", GREEN))
+    # [2026-09-09 联动拉起] Channel 是总开关：若 QQ 已登录(数据目录有态)但 NapCat 进程没跑，
+    # 顺带自动拉起 QQ bot（自动登录等待窗静默上线，不弹码）。让 [1]=拉起全部服务、
+    # [2]=仅处理登录态异常/重登/扫码，符合直觉。
+    _auto_pull_qq()
+    return True
+
+def _auto_pull_qq(progress=print):
+    """Channel 启动后联动：QQ 已登录但未运行 → 后台拉起 NapCat。
+    完整登录流程 qq_start_and_qr 自带：已运行检测 / 25s 自动登录等待窗 / 扫码兜底，
+    放进 daemon 线程执行，避免阻塞菜单；输出打到终端（TUI 下可见但不卡输入）。"""
+    try:
+        from qqdeploy import qq_deploy_status, qq_start_and_qr
+        dep = qq_deploy_status()
+    except Exception as e:
+        progress(c(f"  QQ 联动检查失败: {e}", YELLOW))
+        return False
+    if not dep["installed"]:
+        return False                       # 未部署 → 交给 [2] 首次部署
+    if not dep["logged_in"] or not dep["uin"]:
+        progress(c("  QQ 未登录 → 需要时到 [2] 扫码", YELLOW))
+        return False
+    if dep["running"]:
+        return True                        # 已在跑 → 无需动作
+    progress(c("  QQ 已登录但未运行 → 后台自动拉起 NapCat（免扫码静默上线）…", CYAN))
+    import threading
+    threading.Thread(target=qq_start_and_qr, kwargs={"need_scan": True, "progress": progress},
+                     daemon=True).start()
     return True
 
 def stop_channel():

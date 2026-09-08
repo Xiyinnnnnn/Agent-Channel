@@ -27,7 +27,10 @@ WORKDIR = os.path.join(QQ_BASE, "napcat")                     # NAPCAT_WORKDIR �
 QQDATA = os.path.join(HOME, ".qqdata")                       # QQ数据目录(隐藏, 防止guild1.db散落家目录)
 PID_FILE = os.path.join(QQ_BASE, "qq.pid")
 LOG_FILE = os.path.join(QQ_BASE, "qq-run.log")
-CFG_PATH = os.path.join(HOME, ".local/bin/term_agent/channel/config.json")
+# 2026-09-09 修复：旧值硬编码残留路径 ~/.local/bin/term_agent/channel/config.json（9-08已清理）
+# → 导致 qq_write_channel_cfg 登录成功回写必然 FileNotFoundError。改为相对本文件定位唯一真身。
+CFG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "channel", "config.json")
 WEBUI_PORT = 6099
 API_PORT = 3000
 # 与 channel/adapters/qq.py 反向HTTP接收端一致
@@ -441,6 +444,10 @@ def qq_start_and_qr(need_scan=True, progress=print):
       已登录(数据目录有真实登录态) → 快速登录（免扫码，自动 -q <uin>）
       未登录 → 启动并解析 NapCat 二维码 URL → segno 直接渲染到终端 → 等手机 QQ 扫码
     阻塞等待登录成功。成功判定 = NapCat 正向 API get_login_info 返回真实 QQ 号。
+    [2026-09-09 自动登录等待窗] QQ 内核「允许自动登录」通常会在启动后 ~15s 内静默恢复在线，
+    而 NapCat 快速登录票据(GetQuickLoginList)在本机恒为空、必然打码 —— 这在已启用自动登录的
+    机器上纯属噪音。故启动后先留 25s 自动登录探测窗：探测到在线直接返回成功，不渲染任何二维码。
+    仅当窗口结束仍未在线，才进入二维码显示/刷新流程（此时才是真需要人工扫码）。
     二维码刷新策略（解决"扫到过期码"）：
       · NapCat 内核在二维码过期(ErrCode 3)时会自动拉新码并打进日志 →
         控制循环每 1.5s 监视日志，发现新 URL 立即重新打印，绝不让旧码滞留屏幕。
@@ -451,16 +458,20 @@ def qq_start_and_qr(need_scan=True, progress=print):
       · 若登录系统异常(ErrCode 1)导致无法换新，持续重打并在控制台提示。
     """
     dep = qq_deploy_status()
+    # [自动登录等待窗] 无论有无 -q 票据：先给 QQ 内核自动登录 25s 探测时间。
+    # 有登录态且最终在线 → 完美静默；有登录态但未在线 → 也先走快速登录 -q 再等待；
+    # 完全无登录态 → 下述 qq_start 已会走纯打码（need_scan=False 不带 -q），此处无需处理。
     if dep["logged_in"] and dep["uin"]:
         progress("  检测到 QQ 登录态 (nt_qq_%s)，走快速登录，免扫码。" % dep["uin"])
         ok, proc = qq_start(need_scan=True, progress=progress)
         if not ok: return False
-        progress("  快速登录中…")
+        progress("  QQ 内核自动登录中（最多等待25秒，免扫码）…")
     else:
         ok, proc = qq_start(need_scan=False, progress=progress)
         if not ok: return False
         progress("  准备二维码…")
     # ---- 等待登录成功（唯一真判定：NapCat API get_login_info 就绪）----
+    start_ts = time.time()
     deadline = time.time() + 180
     shown_url = None          # 当前屏幕上显示的二维码 URL
     shown_at = 0.0            # 当前二维码首次显示时刻
@@ -477,6 +488,13 @@ def qq_start_and_qr(need_scan=True, progress=print):
             progress("  进程已退出")
             return False
         now = time.time()
+        # 自动登录等待窗（前 25s）：QQ 内核「允许自动登录」生效时静默上线，不渲染二维码。
+        if now - start_ts < 25.0:
+            if not last_print_ts:
+                last_print_ts = now
+                progress("  等待 QQ 自动登录恢复在线…")
+            time.sleep(1.5)
+            continue
         # ① 监视日志：NapCat 自动换了新码 → 立即重打
         url = _scan_latest_qr_url()
         if url and url != shown_url:
