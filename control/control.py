@@ -473,7 +473,7 @@ def act_qq_login():
         print("  [r] 重新扫码登录    [s] 停止 QQ    [0] 返回")
         k = input("  选择: ").strip().lower()
         if k == "r":
-            pass  # 继续向下：先备份数据再扫新码
+            pass  # 继续向下：先清除旧数据再扫新码
         elif k == "s":
             from qqdeploy import qq_stop
             qq_stop()
@@ -499,11 +499,11 @@ def act_qq_login():
         print(c("  NapCat 部署完成。", GREEN))
         dep = qq_deploy_status()
     if qs == "ok" and dep.get("running"):
-        # [r] 重新登录：先停 → 备份数据 → 全新扫码
+        # [r] 重新登录：先停 → 清除旧数据 → 全新扫码
         print(c("  正在停止 NapCat…", YELLOW))
         qq_stop()
         qq_reset_login()
-        print(c("  旧登录态已备份移除，开始全新扫码。", YELLOW))
+        print(c("  旧登录态已清除，开始全新扫码。", YELLOW))
     print()
     ok = qq_start_and_qr(need_scan=True)   # 内部按登录态自动分流：有态→快速登录/无态→QR
     if ok:

@@ -380,13 +380,14 @@ def qq_write_channel_cfg(uin):
 
 # ---------------- 扫码登录主流程 ----------------
 def qq_reset_login(progress=print):
-    """重新登录：备份 QQ 数据目录后返回（下次启动即全新二维码登录）。"""
+    """重新登录：清除旧 QQ 数据目录（登录态/聊天缓存），下次启动即全新二维码登录。
+    不保留备份，直接删除，避免反复重登累积大量 ~/.config/QQ.backup-* 占空间。"""
+    import shutil
     qq_conf = os.path.join(HOME, ".config/QQ")
     if os.path.isdir(qq_conf):
-        bak = qq_conf + ".backup-" + time.strftime("%Y%m%d-%H%M%S")
-        os.rename(qq_conf, bak)
-        progress("  QQ 数据已备份至: %s" % bak)
-        progress("  提示：原账号数据仍在备份目录，确认新账号正常后可按需删除。")
+        sz = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(qq_conf) for f in fs)
+        shutil.rmtree(qq_conf)
+        progress("  旧 QQ 数据已清除（%.1f MB），开始全新扫码登录。" % (sz / 1048576))
     else:
         progress("  未发现 QQ 数据目录。")
     return True
