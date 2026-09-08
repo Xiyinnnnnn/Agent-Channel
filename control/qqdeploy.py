@@ -24,6 +24,7 @@ RUNTIME = os.path.join(QQ_BASE, "runtime")                    # AppImage 解包�
 QQ_BIN = os.path.join(RUNTIME, "qq")
 LOAD_NC = os.path.join(RUNTIME, "resources/app/loadNapCat.js")
 WORKDIR = os.path.join(QQ_BASE, "napcat")                     # NAPCAT_WORKDIR → NapCat config/logs/cache
+QQDATA = os.path.join(HOME, ".qqdata")                       # QQ数据目录(隐藏, 防止guild1.db散落家目录)
 PID_FILE = os.path.join(QQ_BASE, "qq.pid")
 LOG_FILE = os.path.join(QQ_BASE, "qq-run.log")
 CFG_PATH = os.path.join(HOME, ".local/bin/term_agent/channel/config.json")
@@ -309,12 +310,13 @@ def qq_start(need_scan=False, progress=print):
     uin = _effective_uin()
     cmd = _boot_cmd(need_scan, uin)
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    os.makedirs(QQDATA, exist_ok=True)
     env = dict(os.environ)
     env["NAPCAT_WORKDIR"] = WORKDIR
     env.setdefault("PYTHONUNBUFFERED", "1")
     with open(LOG_FILE, "a", encoding="utf-8") as logf:
         proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                env=env, start_new_session=True)
+                                env=env, start_new_session=True, cwd=QQDATA)
     with open(PID_FILE, "w") as f:
         f.write(str(proc.pid))
     time.sleep(4)
