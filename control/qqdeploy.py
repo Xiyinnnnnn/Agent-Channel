@@ -417,6 +417,52 @@ def _render_qr(url, progress=print):
     progress("  等待扫码…（二维码约 2 分钟自动刷新，请以最新一次显示为准）")
     progress("")
 
+def _napcat_credential():
+    """获取 NapCat WebUI 内部 API 通行凭证（1小时有效，每次重新拉取）。"""
+    try:
+        import hashlib
+        cfg_path = os.path.join(WORKDIR, "config", "webui.json")
+        with open(cfg_path, encoding="utf-8") as f:
+            wcfg = json.load(f)
+        token = str(wcfg.get("token") or "")
+        h = hashlib.sha256((token + ".napcat").encode()).hexdigest()
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/api/auth/login" % WEBUI_PORT,
+            data=json.dumps({"hash": h}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            body = json.loads(r.read().decode("utf-8", "ignore"))
+        d = body.get("data") or {}
+        cred = d.get("Credential") if isinstance(d, dict) else ""
+        return cred or ""
+    except Exception:
+        return ""
+
+def _napcat_refresh_qr():
+    """通过 NapCat 内部 API 强制刷新一张新二维码，返回新 URL（失败返回空串）。"""
+    try:
+        cred = _napcat_credential()
+        if not cred:
+            return ""
+        H = {"Content-Type": "application/json", "Authorization": "Bearer " + cred}
+        base = "http://127.0.0.1:%d/api/QQLogin" % WEBUI_PORT
+        # 1) 强制刷新（内部会重新拉取新码）
+        req = urllib.request.Request(base + "/RefreshQRcode",
+                                     data=json.dumps({}).encode("utf-8"),
+                                     headers=H, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            r.read()
+        # 2) 取新码 URL
+        req2 = urllib.request.Request(base + "/GetQQLoginQrcode",
+                                      data=json.dumps({}).encode("utf-8"),
+                                      headers=H, method="POST")
+        with urllib.request.urlopen(req2, timeout=5) as r:
+            body = json.loads(r.read().decode("utf-8", "ignore"))
+        d = body.get("data") or {}
+        return (d.get("qrcode") or "") if isinstance(d, dict) else ""
+    except Exception:
+        return ""
+
 def _scan_latest_qr_url():
     """从 NapCat 运行日志取最新一条『二维码解码URL:』。"""
     try:
@@ -432,8 +478,16 @@ def qq_start_and_qr(need_scan=True, progress=print):
     control 入口：
       已登录(数据目录有真实登录态) → 快速登录（免扫码，自动 -q <uin>）
       未登录 → 启动并解析 NapCat 二维码 URL → segno 直接渲染到终端 → 等手机 QQ 扫码
-    阻塞等待登录成功。成功判定 = NapCat 正向 API get_login_info 返回真实 QQ 号
-    （绝不把残留 config 反查当登录成功，否则会误报成功 → 二维码永不显示）。
+    阻塞等待登录成功。成功判定 = NapCat 正向 API get_login_info 返回真实 QQ 号。
+
+    二维码刷新策略（解决"扫到过期码"）：
+      · NapCat 内核在二维码过期(ErrCode 3)时会自动拉新码并打进日志 →
+        控制循环每 1.5s 监视日志，发现新 URL 立即重新打印，绝不让旧码滞留屏幕。
+      · 距上次打印满 30 秒 → 无条件重新打印一次当前最新二维码
+        （配合时间戳让用户知道二维码是新鲜的，催促尽快扫码）。
+      · 当前二维码已显示超过 90 秒（QQ 码寿命约 2 分钟）时 → 主动调用
+        NapCat RefreshQRcode 接口尝试换新；换到新码立即重打。
+      · 若登录系统异常(ErrCode 1)导致无法换新，持续重打并在控制台提示。
     """
     dep = qq_deploy_status()
     if dep["logged_in"] and dep["uin"]:
@@ -447,7 +501,11 @@ def qq_start_and_qr(need_scan=True, progress=print):
         progress("  正在准备二维码…")
     # ---- 等待登录成功（唯一真判定：NapCat API get_login_info 就绪）----
     deadline = time.time() + 180
-    shown_url = None
+    shown_url = None          # 当前屏幕上显示的二维码 URL
+    shown_at = 0.0            # 当前二维码首次显示时刻
+    last_print_ts = 0.0       # 上次重打时刻
+    last_force_ts = 0.0       # 上次主动 RefreshQRcode 时刻
+    last_err_hint = ""        # 上次提示过的登录异常
     while time.time() < deadline:
         uid = _api_login_uin()
         if uid:
@@ -457,15 +515,44 @@ def qq_start_and_qr(need_scan=True, progress=print):
         if proc is not None and not _proc_running(proc.pid):
             progress("  NapCat 进程已退出，登录流程中断。")
             return False
-        # 未登录/扫码阶段：监视日志里的二维码 URL，变化即重新渲染(约2分钟自动刷新)
-        # 快速登录若退化为弹码也会在此兜底渲染
+        now = time.time()
+        # ① 监视日志：NapCat 自动换了新码 → 立即重打
         url = _scan_latest_qr_url()
         if url and url != shown_url:
             if shown_url:
                 progress("")
-                progress("  二维码已刷新，请用手机 QQ 扫上方最新二维码。")
+                progress("  检测到新二维码，已自动刷新，请用手机 QQ 扫上方最新二维码。")
             shown_url = url
+            shown_at = now
             _render_qr(url, progress=progress)
+            last_print_ts = now
+            continue
+        # ② 当前码已显示超过 90 秒且 30 秒内没主动换过 → 试着换新
+        if shown_url and now - shown_at >= 90 and now - last_force_ts >= 30:
+            last_force_ts = now
+            new_url = _napcat_refresh_qr()
+            if new_url and new_url != shown_url:
+                progress("")
+                progress("  二维码已刷新，请用手机 QQ 扫上方最新二维码。")
+                shown_url = new_url
+                shown_at = now
+                _render_qr(new_url, progress=progress)
+                last_print_ts = now
+                continue
+            elif not new_url:
+                progress("  未能换新二维码（登录系统可能异常），请稍候自动重试。")
+        # ③ 距上次打印满 30 秒 → 无条件重打当前最新二维码（保持屏幕新鲜）
+        if now - last_print_ts >= 30:
+            cur = shown_url or _scan_latest_qr_url()
+            if cur:
+                shown_url = cur
+                shown_at = shown_at or now
+                if shown_url:
+                    progress("")
+                    progress("  [%s] 二维码已重新打印，请尽快用手机 QQ 扫码。" %
+                             time.strftime("%H:%M:%S"))
+                _render_qr(cur, progress=progress)
+            last_print_ts = now
         time.sleep(1.5)
     progress("  等待登录超时（3 分钟）。NapCat 仍在运行，可稍后手动扫码或重试。")
     return False

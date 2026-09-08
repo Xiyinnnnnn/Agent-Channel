@@ -10,9 +10,9 @@ import json, time, urllib.parse, uuid
 from . import net
 
 DEFAULT_BOT_TYPE = "3"
-ACTIVE_TTL_S = 5 * 60
+ACTIVE_TTL_S = 30          # 二维码有效期：30 秒即强制换新码（防止扫码扫到过期码）
 WAIT_STEP_S = 1.0
-MAX_QR_REFRESH = 3
+MAX_QR_REFRESH = 60
 
 def _poll_once(base, qrcode, verify_code=None):
     ep = "ilink/bot/get_qrcode_status?qrcode=" + urllib.parse.quote(qrcode, safe="")
@@ -38,6 +38,7 @@ def login_flow(accounts_module=None, api_base_url=None, bot_type=DEFAULT_BOT_TYP
     返回 dict：connected / alreadyConnected / account_id / token / base_url / user_id / message
     """
     base = (api_base_url or net.DEFAULT_BASE_URL).rstrip("/")
+    qr_printed_since = time.time()   # 本次二维码已展示的时刻
     local_tokens = []
     if accounts_module is not None:
         for aid in accounts_module.list_account_ids():
@@ -45,6 +46,23 @@ def login_flow(accounts_module=None, api_base_url=None, bot_type=DEFAULT_BOT_TYP
             if d and d.get("token"):
                 local_tokens.append(d["token"].strip())
         local_tokens = local_tokens[-10:]
+
+    def force_refresh_qr(label="二维码已过期"):
+        """重新拉一张新二维码并立刻打印。返回 True 成功 / False 失败。"""
+        nonlocal qr, qr_url, start, scanned_printed, current_base
+        try:
+            r = _fetch_qr(current_base, bot_type, local_tokens)
+        except Exception as e:
+            if on_status: on_status("wait", f"刷新二维码失败: {e}")
+            return False
+        qrcode_new = r.get("qrcode") or ""
+        if not qrcode_new:
+            return False
+        qr, qr_url = qrcode_new, r.get("qrcode_img_content") or qr_url
+        start = time.time(); scanned_printed = False
+        if on_status: on_status("refreshing", label)
+        if on_qr: on_qr(qr_url)
+        return True
 
     try:
         qr = _fetch_qr(base, bot_type, local_tokens)
@@ -56,6 +74,7 @@ def login_flow(accounts_module=None, api_base_url=None, bot_type=DEFAULT_BOT_TYP
         return {"connected": False, "message": f"服务端未返回 qrcode: {qr}"}
     if on_qr:
         on_qr(qr_url)
+    qr_printed_since = time.time()
 
     deadline = time.time() + total_timeout_s
     current_base = base
@@ -64,25 +83,23 @@ def login_flow(accounts_module=None, api_base_url=None, bot_type=DEFAULT_BOT_TYP
     qr_refresh = 0
     start = time.time()
 
-    def refresh_qr():
-        nonlocal qr, qr_url, start, scanned_printed
-        r = _fetch_qr(current_base, bot_type, local_tokens)
-        qrcode_new = r.get("qrcode") or ""
-        if not qrcode_new:
-            return False
-        qr, qr_url = qrcode_new, r.get("qrcode_img_content") or qr_url
-        start = time.time(); scanned_printed = False
-        if on_qr: on_qr(qr_url)
-        return True
-
     while time.time() < deadline:
+        # 30 秒自动换新码并重新打印，确保扫码时不过期
+        if time.time() - qr_printed_since >= 30:
+            qr_refresh += 1
+            if qr_refresh > MAX_QR_REFRESH:
+                return {"connected": False, "message": "二维码多次刷新，请稍后再试。"}
+            if not force_refresh_qr("二维码已刷新，请扫最新二维码"):
+                time.sleep(WAIT_STEP_S)
+            qr_printed_since = time.time()
+            continue
         if _is_expired_started(start):
             qr_refresh += 1
             if qr_refresh > MAX_QR_REFRESH:
                 return {"connected": False, "message": "二维码多次失效，请稍后再试。"}
-            if on_status: on_status("refreshing", "二维码已过期，正在刷新…")
-            if not refresh_qr():
+            if not force_refresh_qr("二维码已过期，正在刷新…"):
                 return {"connected": False, "message": "刷新二维码失败。"}
+            qr_printed_since = time.time()
             continue
         try:
             st = _poll_once(current_base, qr, pending_verify)
@@ -110,17 +127,17 @@ def login_flow(accounts_module=None, api_base_url=None, bot_type=DEFAULT_BOT_TYP
             qr_refresh += 1
             if qr_refresh > MAX_QR_REFRESH:
                 return {"connected": False, "message": "二维码多次失效，流程已停止。"}
-            if on_status: on_status("refreshing", "二维码已过期，正在刷新…")
-            if not refresh_qr():
+            if not force_refresh_qr("二维码已过期，正在刷新…"):
                 return {"connected": False, "message": "刷新二维码失败。"}
+            qr_printed_since = time.time()
         elif status == "verify_code_blocked":
             pending_verify = None
             qr_refresh += 1
             if qr_refresh > MAX_QR_REFRESH:
                 return {"connected": False, "message": "多次输入错误，流程已停止。"}
-            if on_status: on_status("refreshing", "多次输入错误，正在刷新二维码…")
-            if not refresh_qr():
+            if not force_refresh_qr("多次输入错误，正在刷新二维码…"):
                 return {"connected": False, "message": "刷新二维码失败。"}
+            qr_printed_since = time.time()
         elif status == "binded_redirect":
             return {"connected": False, "alreadyConnected": True,
                     "message": "该微信号已连接过本机 Channel，凭证仍有效，无需重复连接。"}

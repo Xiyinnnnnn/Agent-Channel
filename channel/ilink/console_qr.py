@@ -13,9 +13,10 @@ def _show_segno(url):
         return None
 
 def show(url, title="请用手机微信扫描下方二维码："):
+    import time as _t
     try:
         print("")
-        print("  " + title)
+        print("  [" + _t.strftime("%H:%M:%S") + "] " + title)
         print("  " + "-" * 48)
         try:
             _show_segno(url)

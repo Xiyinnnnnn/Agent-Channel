@@ -226,11 +226,11 @@ def qq_login_state():
         return {"level": "ok", "deployed": True, "running": True}
     if deployed and has_login and not running:
         return {"level": "half", "deployed": True, "has_login": True,
-                "running": False, "hint": "已登录 → 选 [3] 一键快速登录(免扫码)"}
+                "running": False, "hint": "已登录 → 选 [2] 一键快速登录(免扫码)"}
     if deployed and not has_login:
         return {"level": "half", "deployed": True, "has_login": False,
-                "running": running, "hint": "NapCat 已就绪 → 选 [3] 扫码登录"}
-    return {"level": "none", "hint": "QQ 未部署 → 选 [3] 自动部署+扫码"}
+                "running": running, "hint": "NapCat 已就绪 → 选 [2] 扫码登录"}
+    return {"level": "none", "hint": "QQ 未部署 → 选 [2] 自动部署+扫码"}
 
 def adapter_login_state():
     return {"qq": qq_login_state(), "wechat": wx_login_state()}
@@ -351,8 +351,8 @@ def render():
     wx_lv = wx.get("level", "none")
     if qq_lv == "ok": qq_line = c("● 已登录", GREEN)
     elif qq_lv == "half":
-        if qq.get("has_login"): qq_line = c("● 已登录 · 未运行", YELLOW)   # 选[3]快速登录
-        else: qq_line = c("○ 未登录 · 已就绪", YELLOW)                     # 选[3]扫码登录
+        if qq.get("has_login"): qq_line = c("● 已登录 · 未运行", YELLOW)   # 选[2]快速登录
+        else: qq_line = c("○ 未登录 · 已就绪", YELLOW)                     # 选[2]扫码登录
     else: qq_line = c("○ 未登录", RED)
     if wx_lv == "ok": wx_line = c("● 已登录", GREEN)
     elif wx_lv == "half": wx_line = c("! 异常", YELLOW)
@@ -378,8 +378,8 @@ def render():
     print(c("╠" + "═"*(w-2) + "╣", CYAN))
     menu = [
         ("1", "启动 / 停止 Channel"),
-        ("2", "微信登录"),
-        ("3", "QQ登录"),
+        ("2", "QQ登录"),
+        ("3", "微信登录"),
         ("4", "多模态 ON / OFF"),
         ("5", "刷新状态"),
         ("0", "退出"),
@@ -392,28 +392,17 @@ def render():
     print(c("按数字直接进入对应功能：未登录则直接拉二维码，已登录可 [r] 重新登录。", NC))
     print()
 
-def _pause():
+def _pause(delay=1.5):
+    """操作完成后自动返回主页面：不打印提示、不需回车，短暂停留看结果后由主循环自动刷新。"""
     try:
-        input(c("按回车返回…", CYAN))
-    except EOFError:
+        time.sleep(delay)
+    except KeyboardInterrupt:
         pass
 
 def _done(ok=True):
-    """登录流程收尾：成功 → 短暂提示后自动回主页面（用户无需再按键）；
-    失败/未完成 → 保留按回车返回（避免错误信息一闪而过）。"""
-    if not ok:
-        _pause(); return
-    print()
-    sys.stdout.write(c("● 操作完成，", GREEN) + c("2.5 秒后自动返回主页面…", CYAN))
-    sys.stdout.flush()
-    try:
-        for _ in range(5):
-            time.sleep(0.5)
-            sys.stdout.write("\r  " + c("即将自动返回主页面…  ", CYAN))
-            sys.stdout.flush()
-    except KeyboardInterrupt:
-        pass
-    print()
+    """登录流程收尾：成功 → 静默停留 1.6 秒后自动回主页面；失败 → 留 3 秒读错误信息后自动回。
+    全程不打印额外语句、不需按回车。"""
+    _pause(3.0 if not ok else 1.6)
 
 def act_start_stop():
     st, info, *_ = status_line()
@@ -433,7 +422,7 @@ def _enable_adapter(name):
     return cfg
 
 def act_wx_login():
-    """2. 微信登录：已登录→提示[r]重登；未登录→直接拉 QR 扫码。"""
+    """3. 微信登录：已登录→提示[r]重登；未登录→直接拉 QR 扫码。"""
     st, info, qq, wx, mm = status_line()
     if wx.get("level") == "ok":
         print()
@@ -475,7 +464,7 @@ def act_wx_login():
     _done(ok)
 
 def act_qq_login():
-    """3. QQ登录：官方 AppImage 自动部署 → 扫码/快速登录 → ●已登录。"""
+    """2. QQ登录：官方 AppImage 自动部署 → 扫码/快速登录 → ●已登录。"""
     st, info, qq, wx, mm = status_line()
     qs = qq.get("level")
     if qs == "ok":
@@ -520,7 +509,7 @@ def act_qq_login():
     if ok:
         print()
         print(c("● QQ 登录完成，NapCat 运行中。", GREEN))
-        print("  - 免重扫：重启后选 [3] 即自动快速登录")
+        print("  - 免重扫：重启后选 [2] 即自动快速登录")
         print("  - 已写入 channel/config.json (qq 适配器自动启用)")
         print("  - 收发就绪：HTTP :3000 正向API / 事件推 127.0.0.1:18086/onebot")
         _enable_adapter("qq")
@@ -539,7 +528,7 @@ def act_log():
         print(c("本地回复记录 outbox-local.log 末尾 10 行", BOLD))
         print("-"*56)
         print(tail_file(OUTBOX_LOG, 10))
-    _pause()
+    _pause(5)
 
 def main():
     # 兼容单参数子命令：control.py --status / --start / --stop（给脚本/快捷用）
@@ -561,8 +550,8 @@ def main():
         except (EOFError, KeyboardInterrupt):
             print("\n  再见。"); return
         if k == "1": act_start_stop()
-        elif k == "2": act_wx_login()
-        elif k == "3": act_qq_login()
+        elif k == "2": act_qq_login()
+        elif k == "3": act_wx_login()
         elif k == "4": toggle_multimodal(); _pause()
         elif k == "5": continue          # 刷新=回到 render 顶部（自然循环）
         elif k == "0": print("  再见。"); return
