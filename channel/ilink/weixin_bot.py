@@ -51,14 +51,11 @@ def do_qr_login(total_timeout_s=480):
     def on_qr(url):
         console_qr.show(url)
     def on_status(status, note):
-        label = {"wait": "等待扫码…", "scaned": "已扫码，请在手机确认",
+        label = {"scaned": "已扫码, 手机上确认",
                  "confirmed": "确认成功", "expired": "二维码过期",
-                 "refreshing": "刷新二维码", "redirect": "切换节点",
-                 "need_verifycode": "需要配对码", "verify_code_blocked": "配对码被拦截",
-                 "binded_redirect": "已连接过"}.get(status, status)
-        if status in ("scaned", "confirmed", "refreshing", "binded_redirect", "redirect"):
-            print("\r  · " + label + ("  " + note if note else "") + "    ", flush=True)
-        sys.stdout.flush()
+                 "refreshing": "已刷新"}.get(status, "")
+        if label:
+            print("\r  " + label + (" " + note if note else "") + "    ", flush=True)
     def read_verify(prompt):
         try:
             return input("\n  " + prompt)

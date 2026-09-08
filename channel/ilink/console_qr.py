@@ -12,22 +12,13 @@ def _show_segno(url):
         qr.terminal(out=sys.stdout, border=1)
         return None
 
-def show(url, title="请用手机微信扫描下方二维码："):
+def show(url, title="请用手机微信扫描二维码:"):
     import time as _t
+    print("[" + _t.strftime("%H:%M:%S") + "] " + title)
+    print("-" * 40)
     try:
-        print("")
-        print("  [" + _t.strftime("%H:%M:%S") + "] " + title)
-        print("  " + "-" * 48)
-        try:
-            _show_segno(url)
-        except Exception:
-            # compact 兼容失败再试标准宽度
-            import segno
-            segno.make(url, error='l').terminal(out=sys.stdout, border=1)
-        print("  " + "-" * 48)
+        _show_segno(url)
     except Exception:
-        pass
-    # 无论二维码是否渲染成功，总打印可点链接
-    print("  若二维码无法显示，请复制下方链接到浏览器打开（手机/电脑均可，需已登录微信）：")
-    print("  " + url)
-    print("")
+        print(url)
+    print("-" * 40)
+    print()

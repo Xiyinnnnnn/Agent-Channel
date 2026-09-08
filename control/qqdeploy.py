@@ -6,7 +6,6 @@ QQ 一键部署 —— 官方 NapCatAppImageBuild 一体式 AppImage（QQ NT + N
 NapCat-Installer 内嵌旧链接亦全部 404。NapCat 官方另有 AppImage 构建仓库
 (NapNeko/NapCatAppImageBuild)，把 QQ NT 客户端 + NapCat v4 打成单个官方 AppImage，
 GitHub 官方直链下载 → 彻底绕开 qqdl。来源=GitHub 官方 org，符合任务书白名单。
-
 形态（已实测 v4.18.19）：
   AppImage 解包后内含 qq(204MB Electron QQ) + resources/app(已注入 loadNapCat.js) + napcat/
   运行 runtime/qq --no-sandbox：
@@ -15,11 +14,9 @@ GitHub 官方直链下载 → 彻底绕开 qqdl。来源=GitHub 官方 org，符
     - QQ 数据(登录态)落 ~/.config/QQ/nt_qq_<uin>，与系统 QQ 数据一致
     - NapCat 配置(webui.json/onebot11_*.json/logs)落 NAPCAT_WORKDIR
     - 登录成功后 NapCat 自动载入 config/onebot11.json 网络配置（HTTP server 3000 + HTTP 客户端推事件）
-
 免重扫：登录态 = ~/.config/QQ/nt_qq_<uin>。重启时带 `-q <uin>` → NapCat 快速登录，不再弹码。
 """
 import json, os, re, signal, subprocess, sys, time, glob, socket, hashlib, urllib.request
-
 HOME = os.path.expanduser("~")
 QQ_BASE = os.path.join(HOME, ".local/share/agent-terminal/qq")
 APPIMAGE = os.path.join(QQ_BASE, "QQ-NapCat.AppImage")       # 官方原始资产(留档/校验/重解包)
@@ -36,7 +33,6 @@ API_PORT = 3000
 WEBHOOK_HOST, WEBHOOK_PORT = "127.0.0.1", 18086
 WEBHOOK_PATH = "/onebot"
 NC_VER = "4.18.19"  # 本会话核验版本（git 提交留档）
-
 # ---------------- 基础 ----------------
 def _qq_data_has_login():
     """QQ 登录态：NTQQ 数据目录存在带后缀 nt_qq_*（数字 uin 或 hash 目录均可）。
@@ -51,7 +47,6 @@ def _qq_data_has_login():
         except Exception:
             pass
     return False
-
 def _uin_from_datadir():
     """优先从数据目录名取数字 uin（旧版 nt_qq_<uin>）。"""
     qq_conf = os.path.join(HOME, ".config/QQ")
@@ -61,7 +56,6 @@ def _uin_from_datadir():
             if m:
                 return m.group(1)
     return ""
-
 def _uin_from_napcat_cfg():
     """hash 目录(NTQQ新版)时数字 uin 不在目录名 → 从 NapCat 配置反查账号。"""
     cfg_dir = os.path.join(WORKDIR, "config")
@@ -75,7 +69,6 @@ def _uin_from_napcat_cfg():
         except Exception:
             pass
     return ""
-
 def _api_login_uin():
     """OneBot 正向 API 已就绪(=登录完成)时返回真实 QQ 号。"""
     if not _port_open("127.0.0.1", API_PORT):
@@ -90,32 +83,26 @@ def _api_login_uin():
         return str(uid) if uid else ""
     except Exception:
         return ""
-
 def _effective_uin():
     """当前有效 QQ 号：数据目录数字后缀 → NapCat 配置 → API 探测，逐级兜底。"""
     return (_uin_from_datadir() or _uin_from_napcat_cfg() or _api_login_uin())
-
 def _logged_uin():
     return _effective_uin()
-
 def _port_open(host, port, timeout=0.4):
     try:
         s = socket.create_connection((host, int(port)), timeout=timeout); s.close(); return True
     except OSError:
         return False
-
 def _proc_running(pid):
     try:
         os.kill(pid, 0); return True
     except OSError:
         return False
-
 def _read_pid():
     try:
         with open(PID_FILE) as f: return int(f.read().strip())
     except Exception:
         return None
-
 # ---------------- 状态 ----------------
 def qq_deploy_status():
     """installed / logged_in / running / webui / api 多维状态。"""
@@ -133,17 +120,15 @@ def qq_deploy_status():
         "webui": _port_open("127.0.0.1", WEBUI_PORT),
         "api": _port_open("127.0.0.1", API_PORT),
     }
-
 # ---------------- 部署（AppImage → runtime） ----------------
 def _ensure_runtime(progress=print):
     """若 runtime 缺失或关键文件不齐，从官方 AppImage 重新解包。"""
     if os.path.isfile(QQ_BIN) and os.path.isfile(LOAD_NC):
         return True
     if not os.path.isfile(APPIMAGE):
-        progress("  找不到官方 AppImage：%s" % APPIMAGE)
-        progress("  请从 GitHub 官方仓库 NapNeko/NapCatAppImageBuild 获取后放至上述路径。")
+        progress("  缺少 AppImage: %s" % APPIMAGE)
         return False
-    progress("  正在解包官方 AppImage（一次约 10~30s）…")
+    progress("  正在解包 AppImage…")
     os.makedirs(RUNTIME, exist_ok=True)
     # --appimage-extract 需在空目录进行（产物为 squashfs-root/）
     tmp = os.path.join(QQ_BASE, ".extract")
@@ -171,9 +156,8 @@ def _ensure_runtime(progress=print):
     # 清理临时解包
     subprocess.run(["rm", "-rf", tmp])
     ok = os.path.isfile(QQ_BIN) and os.path.isfile(LOAD_NC)
-    progress("  解包完成: " + ("OK" if ok else "文件不齐，请检查"))
+    progress("  解包" + ("完成" if ok else "失败"))
     return ok
-
 def _write_onebot11_config():
     """预写 NAPCAT_WORKDIR/config/onebot11.json：
     - HTTP server :3000（正向 API，供 channel qq adapter 发消息）
@@ -217,7 +201,6 @@ def _write_onebot11_config():
     with open(p, "w", encoding="utf-8") as f:
         json.dump(conf, f, ensure_ascii=False, indent=2)
     os.chmod(p, 0o600)
-
 def _write_webui_config():
     """预写 webui.json：固定本机 token（不经公网，仅 127.0.0.1 可访问）。"""
     cfg_dir = os.path.join(WORKDIR, "config")
@@ -234,7 +217,6 @@ def _write_webui_config():
             "autoLoginAccount": "",
         }, f, ensure_ascii=False, indent=2)
     os.chmod(p, 0o600)
-
 def qq_ensure(progress=print):
     """部署到可用：确保 runtime 解包 + NapCat 配置文件预写。"""
     if not _ensure_runtime(progress):
@@ -242,7 +224,6 @@ def qq_ensure(progress=print):
     _write_onebot11_config()
     _write_webui_config()
     return {"ok": True}
-
 # ---------------- 启停 ----------------
 def _qq_running_pids():
     """返回真正在跑的 QQ(NapCat) 主进程 PID 列表。
@@ -268,7 +249,6 @@ def _qq_running_pids():
             continue
         out.append(int(name))
     return out
-
 def _qq_pgids():
     """返回 QQ 主进程所在进程组 ID（去重）。用于 killpg 精确整组清理。"""
     pgs = set()
@@ -282,7 +262,6 @@ def _qq_pgids():
         except Exception:
             pass
     return sorted(pgs)
-
 def qq_stop():
     # 1) PID 文件指向存活进程 → 直接用其 pid（组长 xvfb sh）
     pid = _read_pid()
@@ -314,20 +293,18 @@ def qq_stop():
     try: os.remove(PID_FILE)
     except OSError: pass
     return True
-
 def _boot_cmd(need_scan, uin):
     """构造启动命令。登录过 → -q <uin> 快速登录；未登录 → 二维码登录。"""
     cmd = ["xvfb-run", "-a", QQ_BIN, "--no-sandbox"]
     if need_scan and uin:
         cmd += ["-q", uin]
     return cmd
-
 def qq_start(need_scan=False, progress=print):
     """启动 NapCat。need_scan=True 且已登录 → 快速登录；未登录 → 打 QR。
     防重复：启动前 /proc 精确扫描真 QQ 主进程，存在即拒绝再起（不依赖 PID 文件）。"""
     alive = _qq_running_pids()
     if alive:
-        progress("  NapCat 已在运行 (PID %s)。如需重启请先「停止 QQ」。" % alive[0])
+        progress("  NapCat 运行中 (PID %s)" % alive[0])
         return True, None
     uin = _effective_uin()
     cmd = _boot_cmd(need_scan, uin)
@@ -347,22 +324,19 @@ def qq_start(need_scan=False, progress=print):
             with open(LOG_FILE, encoding="utf-8") as f:
                 tail = "".join(f.readlines()[-12:])
         except Exception: pass
-        progress("  NapCat 启动失败（进程已退出）。最近输出：\n" + tail)
+        progress("  启动失败:\n" + tail)
         return False, proc
     progress("  NapCat 已启动 (PID %s)，日志: %s" % (proc.pid, LOG_FILE))
     return True, proc
-
 # ---------------- 登录态写回 channel 配置 ----------------
 def _load_cfg():
     try:
         with open(CFG_PATH, encoding="utf-8") as f: return json.load(f)
     except Exception:
         return {}
-
 def _save_cfg(cfg):
     with open(CFG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-
 def qq_write_channel_cfg(uin):
     """把 bot_qq/onebot_http/反向HTTP 写进 channel/config.json 的 qq 段。"""
     cfg = _load_cfg()
@@ -377,7 +351,6 @@ def qq_write_channel_cfg(uin):
         cfg["adapters"] = ads + ["qq"]
     _save_cfg(cfg)
     return True
-
 # ---------------- 扫码登录主流程 ----------------
 def qq_reset_login(progress=print):
     """重新登录：清除旧 QQ 数据目录（登录态/聊天缓存），下次启动即全新二维码登录。
@@ -387,37 +360,26 @@ def qq_reset_login(progress=print):
     if os.path.isdir(qq_conf):
         sz = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(qq_conf) for f in fs)
         shutil.rmtree(qq_conf)
-        progress("  旧 QQ 数据已清除（%.1f MB），开始全新扫码登录。" % (sz / 1048576))
+        progress("  旧数据已清除(%.0f MB)" % (sz / 1048576))
     else:
-        progress("  未发现 QQ 数据目录。")
+        progress("  无旧数据")
     return True
-
 def _render_qr(url, progress=print):
-    """用 segno 在终端渲染 QQ 二维码（微信同款体验）；失败降级打印链接/图片路径。"""
+    """用 segno 在终端渲染 QQ 二维码，失败降级打印链接。"""
     progress("")
-    progress("  请使用手机 QQ 扫描下方二维码：")
-    progress("  " + "-" * 48)
-    shown = False
+    progress("  请用手机QQ扫码:")
+    progress("  " + "-" * 40)
     try:
         import segno
         qr = segno.make(url, error='l')
         try:
             qr.terminal(out=sys.stdout, border=1, compact=True)
-            shown = True
         except TypeError:
             qr.terminal(out=sys.stdout, border=1)
-            shown = True
     except Exception:
-        shown = False
-    progress("  " + "-" * 48)
-    if not shown:
-        progress("  二维码渲染失败，请复制下方链接到浏览器/二维码工具（需手机 QQ 扫码）：")
-    progress("  " + url)
-    progress("  也可打开图片文件扫码：%s" % os.path.join(WORKDIR, "cache", "qrcode.png"))
+        progress("  " + url)
+    progress("  " + "-" * 40)
     progress("")
-    progress("  等待扫码…（二维码约 2 分钟自动刷新，请以最新一次显示为准）")
-    progress("")
-
 def _napcat_credential():
     """获取 NapCat WebUI 内部 API 通行凭证（1小时有效，每次重新拉取）。"""
     try:
@@ -438,7 +400,6 @@ def _napcat_credential():
         return cred or ""
     except Exception:
         return ""
-
 def _napcat_refresh_qr():
     """通过 NapCat 内部 API 强制刷新一张新二维码，返回新 URL（失败返回空串）。"""
     try:
@@ -463,7 +424,6 @@ def _napcat_refresh_qr():
         return (d.get("qrcode") or "") if isinstance(d, dict) else ""
     except Exception:
         return ""
-
 def _scan_latest_qr_url():
     """从 NapCat 运行日志取最新一条『二维码解码URL:』。"""
     try:
@@ -473,14 +433,12 @@ def _scan_latest_qr_url():
         return m[-1] if m else ""
     except Exception:
         return ""
-
 def qq_start_and_qr(need_scan=True, progress=print):
     """
     control 入口：
       已登录(数据目录有真实登录态) → 快速登录（免扫码，自动 -q <uin>）
       未登录 → 启动并解析 NapCat 二维码 URL → segno 直接渲染到终端 → 等手机 QQ 扫码
     阻塞等待登录成功。成功判定 = NapCat 正向 API get_login_info 返回真实 QQ 号。
-
     二维码刷新策略（解决"扫到过期码"）：
       · NapCat 内核在二维码过期(ErrCode 3)时会自动拉新码并打进日志 →
         控制循环每 1.5s 监视日志，发现新 URL 立即重新打印，绝不让旧码滞留屏幕。
@@ -495,11 +453,11 @@ def qq_start_and_qr(need_scan=True, progress=print):
         progress("  检测到 QQ 登录态 (nt_qq_%s)，走快速登录，免扫码。" % dep["uin"])
         ok, proc = qq_start(need_scan=True, progress=progress)
         if not ok: return False
-        progress("  正在快速登录…")
+        progress("  快速登录中…")
     else:
         ok, proc = qq_start(need_scan=False, progress=progress)
         if not ok: return False
-        progress("  正在准备二维码…")
+        progress("  准备二维码…")
     # ---- 等待登录成功（唯一真判定：NapCat API get_login_info 就绪）----
     deadline = time.time() + 180
     shown_url = None          # 当前屏幕上显示的二维码 URL
@@ -511,10 +469,10 @@ def qq_start_and_qr(need_scan=True, progress=print):
         uid = _api_login_uin()
         if uid:
             qq_write_channel_cfg(uid)
-            progress("  ● QQ 登录成功：%s" % uid)
+            progress("  登录成功: %s" % uid)
             return True
         if proc is not None and not _proc_running(proc.pid):
-            progress("  NapCat 进程已退出，登录流程中断。")
+            progress("  进程已退出")
             return False
         now = time.time()
         # ① 监视日志：NapCat 自动换了新码 → 立即重打
@@ -522,7 +480,7 @@ def qq_start_and_qr(need_scan=True, progress=print):
         if url and url != shown_url:
             if shown_url:
                 progress("")
-                progress("  检测到新二维码，已自动刷新，请用手机 QQ 扫上方最新二维码。")
+                progress("  检测到新二维码, 已自动刷新")
             shown_url = url
             shown_at = now
             _render_qr(url, progress=progress)
@@ -534,14 +492,14 @@ def qq_start_and_qr(need_scan=True, progress=print):
             new_url = _napcat_refresh_qr()
             if new_url and new_url != shown_url:
                 progress("")
-                progress("  二维码已刷新，请用手机 QQ 扫上方最新二维码。")
+                progress("  二维码已刷新, 请扫最新码")
                 shown_url = new_url
                 shown_at = now
                 _render_qr(new_url, progress=progress)
                 last_print_ts = now
                 continue
             elif not new_url:
-                progress("  未能换新二维码（登录系统可能异常），请稍候自动重试。")
+                progress("  换新码失败, 稍后重试")
         # ③ 距上次打印满 30 秒 → 无条件重打当前最新二维码（保持屏幕新鲜）
         if now - last_print_ts >= 30:
             cur = shown_url or _scan_latest_qr_url()
@@ -550,10 +508,10 @@ def qq_start_and_qr(need_scan=True, progress=print):
                 shown_at = shown_at or now
                 if shown_url:
                     progress("")
-                    progress("  [%s] 二维码已重新打印，请尽快用手机 QQ 扫码。" %
+                    progress("  [%s] 二维码已更新, 请扫码。" %
                              time.strftime("%H:%M:%S"))
                 _render_qr(cur, progress=progress)
             last_print_ts = now
         time.sleep(1.5)
-    progress("  等待登录超时（3 分钟）。NapCat 仍在运行，可稍后手动扫码或重试。")
+    progress("  等待超时, 可重试")
     return False

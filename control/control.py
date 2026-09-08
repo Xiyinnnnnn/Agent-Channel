@@ -239,10 +239,10 @@ def adapter_login_state():
 def start_channel():
     state, info = channel_status()
     if state == "running":
-        print(c(f"Channel 已在运行中 (PID {info.get('pid')})，无需重复启动。", GREEN))
+        print(c(f"已在运行 (PID {info.get('pid')})", GREEN))
         return False
     if state == "stale":
-        print(c(f"检测到残留状态：{info.get('reason')} → 自动清理。", YELLOW))
+        print(c(f"残留 {info.get('reason')} 已清理", YELLOW))
         _clear_stale()
     os.makedirs(LOG_DIR, exist_ok=True)
     py = sys.executable
@@ -265,24 +265,23 @@ def start_channel():
     if proc.poll() is not None:
         _clear_stale()
         tail = tail_file(LOG_FILE, 10)
-        print(c("Channel 启动失败（进程已退出）。最近日志：", RED))
+        print(c("启动失败, 日志:", RED))
         print(tail)
         return False
-    print(c(f"Channel 已启动 (PID {proc.pid})。", GREEN))
-    print("  日志: " + LOG_FILE)
+    print(c(f"已启动 (PID {proc.pid})", GREEN))
     return True
 
 def stop_channel():
     state, info = channel_status()
     if state == "stopped":
-        print(c("Channel 未运行。", YELLOW))
+        print(c("未运行", YELLOW))
         return False
     if state == "stale":
-        print(c(f"残留状态：{info.get('reason')} → 清理，无需停止。", YELLOW))
+        print(c(f"残留 {info.get('reason')} 已清理", YELLOW))
         _clear_stale()
         return True
     pid = info["pid"]
-    print(c(f"正在停止 Channel (PID {pid})…", CYAN))
+    print(c(f"正在停止 (PID {pid})…", CYAN))
     # 1) SIGTERM 正常关闭（manager 的 KeyboardInterrupt 处理会触发退出打印）
     try:
         os.kill(pid, signal.SIGTERM)
@@ -305,9 +304,9 @@ def stop_channel():
             os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
-        print(c("进程未在宽限期内退出，已强制结束。", YELLOW))
+        print(c("已强制结束", YELLOW))
     else:
-        print(c("Channel 已正常退出。", GREEN))
+        print(c("已停止", GREEN))
     # 4) 清理 PID / 状态
     _clear_stale()
     return True
@@ -322,8 +321,7 @@ def toggle_multimodal():
     cfg["multimodal"] = not cur
     save_config(cfg)
     now = "ON" if cfg["multimodal"] else "OFF"
-    print(c(f"多模态已切换为 {now}。", GREEN))
-    print(c("  仅对新启动的 Agent 任务生效，当前正在执行的任务不受影响。", YELLOW))
+    print(c(f"多模态: {now}", GREEN))
     return cfg["multimodal"]
 
 # ---------------- 首页 ----------------
@@ -388,8 +386,7 @@ def render():
         row(k, c(t, NC))
     print(c("╚" + "═"*(w-2) + "╝", CYAN))
     if st != "running":
-        print(c("提示：Channel 未运行 → 按 [1] 启动。启动后微信/QQ 消息才会触发 Agent。", YELLOW))
-    print(c("按数字直接进入对应功能：未登录则直接拉二维码，已登录可 [r] 重新登录。", NC))
+        print(c("Channel 未运行 → 按 [1] 启动", YELLOW))
     print()
 
 def _pause(delay=1.5):
@@ -426,15 +423,13 @@ def act_wx_login():
     st, info, qq, wx, mm = status_line()
     if wx.get("level") == "ok":
         print()
-        print(c("微信已登录。", GREEN), "账号:", ", ".join(wx.get("accounts") or []))
-        print("  [r] 重新登录（重新扫码）    [0] 返回")
+        print(c("微信已登录", GREEN), "账号:", ", ".join(wx.get("accounts") or []))
+        print("  [r] 重登  [0] 返回")
         k = input("  选择: ").strip().lower()
         if k != "r":
             return
-        print(c("  重新登录将覆盖当前微信账号的凭证。开始…", YELLOW))
     print()
-    print(c("正在启动微信扫码登录…", CYAN))
-    print("  （iLink 通道 · 自动拉取二维码 → 手机微信扫码 → 凭证自动保存，重启免重扫）")
+    print(c("获取微信二维码…", CYAN))
     print()
     try:
         from ilink import weixin_bot as wxbot
@@ -444,7 +439,7 @@ def act_wx_login():
         _pause(); return
     if ok:
         print()
-        print(c("● 微信登录成功！", GREEN))
+        print(c("微信登录成功", GREEN))
         print("  账号:", res.get("saved_account_id") or res.get("account_id") or "(见日志)")
         if res.get("message"): print("  " + res["message"])
         # 自动启用 wechat 适配器 + 重启 Channel 使轮询生效
@@ -453,7 +448,7 @@ def act_wx_login():
         except Exception as e:
             print(c(f"  写入配置失败: {e}", RED))
         print()
-        print(c("提示：已自动启用「微信」适配器。若 Channel 正在运行，重启后开始收微信消息。", YELLOW))
+        print(c("已启用微信适配器", YELLOW))
     else:
         msg = res.get("message") if isinstance(res, dict) else str(res)
         if isinstance(res, dict) and res.get("alreadyConnected"):
@@ -469,20 +464,20 @@ def act_qq_login():
     qs = qq.get("level")
     if qs == "ok":
         print()
-        print(c("QQ 已登录且 NapCat 运行中。", GREEN))
-        print("  [r] 重新扫码登录    [s] 停止 QQ    [0] 返回")
+        print(c("QQ已登录, NapCat运行中", GREEN))
+        print("  [r] 重登  [s] 停止  [0] 返回")
         k = input("  选择: ").strip().lower()
         if k == "r":
             pass  # 继续向下：先清除旧数据再扫新码
         elif k == "s":
             from qqdeploy import qq_stop
             qq_stop()
-            print(c("QQ/NapCat 已停止。", GREEN))
+            print(c("QQ已停止", GREEN))
             _pause(); return
         else:
             return
     print()
-    print(c("正在检查 QQ 环境…", CYAN))
+    print(c("正在检查QQ环境…", CYAN))
     try:
         from qqdeploy import (qq_deploy_status, qq_ensure, qq_start_and_qr,
                               qq_reset_login, qq_stop)
@@ -491,41 +486,38 @@ def act_qq_login():
         _pause(); return
     dep = qq_deploy_status()
     if not dep["installed"]:
-        print(c("正在准备官方 NapCat（首次需下载 QQ + NapCat AppImage，稍候）…", CYAN))
+        print(c("正在部署 NapCat（首次需下载，稍候）…", CYAN))
         r = qq_ensure()
         if not r["ok"]:
             print(c("  部署失败: " + r["error"], RED))
             _pause(); return
-        print(c("  NapCat 部署完成。", GREEN))
+        print(c("部署完成", GREEN))
         dep = qq_deploy_status()
     if qs == "ok" and dep.get("running"):
         # [r] 重新登录：先停 → 清除旧数据 → 全新扫码
-        print(c("  正在停止 NapCat…", YELLOW))
+        print(c("正在停止 NapCat…", YELLOW))
         qq_stop()
         qq_reset_login()
-        print(c("  旧登录态已清除，开始全新扫码。", YELLOW))
+        print(c("旧数据已清除, 开始扫码", YELLOW))
     print()
     ok = qq_start_and_qr(need_scan=True)   # 内部按登录态自动分流：有态→快速登录/无态→QR
     if ok:
         print()
-        print(c("● QQ 登录完成，NapCat 运行中。", GREEN))
-        print("  - 免重扫：重启后选 [2] 即自动快速登录")
-        print("  - 已写入 channel/config.json (qq 适配器自动启用)")
-        print("  - 收发就绪：HTTP :3000 正向API / 事件推 127.0.0.1:18086/onebot")
+        print(c("QQ登录成功, NapCat运行中", GREEN))
+        print("  已启用QQ适配器")
         _enable_adapter("qq")
     else:
         print()
-        print(c("QQ 登录流程未完成（详见上方 NapCat 输出）。", RED))
-        print(c("  NapCat 仍在运行可继续扫码；或重启后再试。", YELLOW))
+        print(c("QQ登录未完成", RED))
     _done(ok)
 
 def act_log():
     print()
-    print(c("最近日志（/tmp/agent-channel/channel.log 末尾 40 行）", BOLD))
+    print(c("日志:", BOLD))
     print("-"*56)
     print(tail_file(LOG_FILE, 40))
     if os.path.exists(OUTBOX_LOG):
-        print(c("本地回复记录 outbox-local.log 末尾 10 行", BOLD))
+        print(c("回复记录:", BOLD))
         print("-"*56)
         print(tail_file(OUTBOX_LOG, 10))
     _pause(5)
@@ -555,7 +547,7 @@ def main():
         elif k == "4": toggle_multimodal(); _pause()
         elif k == "5": continue          # 刷新=回到 render 顶部（自然循环）
         elif k == "0": print("  再见。"); return
-        else: print(c("  无效输入，请按菜单数字。", YELLOW)); time.sleep(0.8)
+        else: print(c("无效输入", YELLOW)); time.sleep(0.8)
 
 if __name__ == "__main__":
     main()
